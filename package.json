@@ -1,12 +1,8 @@
 {
   "name": "dev-infra",
   "version": "0.1.0",
-  "bin": "bin/dev-infra.js",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "test": "jest",
-    "cdk": "cdk"
+    "deploy": "cdk deploy"
   },
   "devDependencies": {
     "@types/node": "22.5.4",
