@@ -14,23 +14,10 @@ export class MongoDbStack extends cdk.Stack {
       vpcName: "default",
     });
 
-    const defaultSecurityGroup = ec2.SecurityGroup.fromLookupByName(
-      this,
-      "defaultSecurityGroup",
-      "default",
-      vpc
-    );
-
-    defaultSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4(vpc.vpcCidrBlock),
-      ec2.Port.tcp(27017),
-      "MongoDB Ingress"
-    );
-
     const cluster = ecs.Cluster.fromClusterAttributes(this, "ecs-cluster", {
       clusterName: "my-dev-ecs-cluster",
       vpc,
-      securityGroups: [defaultSecurityGroup],
+      securityGroups: [],
     });
 
     // ECS Task Role with EBS permissions

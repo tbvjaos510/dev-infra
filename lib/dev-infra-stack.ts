@@ -5,6 +5,7 @@ import { IVpc, LaunchTemplate, Vpc } from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as iam from "aws-cdk-lib/aws-iam";
+import { CfnOutput } from "aws-cdk-lib";
 
 export class DevInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -112,5 +113,9 @@ mkdir -p /data/mongodb
     });
 
     cluster.addAsgCapacityProvider(capacityProvider);
+
+    new CfnOutput(this, "Public IP", {
+      value: eip.attrPublicIp,
+    });
   }
 }
