@@ -1,11 +1,11 @@
 import * as cdk from "aws-cdk-lib";
+import { CfnOutput } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import { IVpc, LaunchTemplate, Vpc } from "aws-cdk-lib/aws-ec2";
+import { IVpc, LaunchTemplate } from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as iam from "aws-cdk-lib/aws-iam";
-import { CfnOutput } from "aws-cdk-lib";
 
 export class DevInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -30,8 +30,8 @@ export class DevInfraStack extends cdk.Stack {
     });
 
     // EBS 볼륨 생성
-    const volume = new ec2.Volume(this, 'DatabaseVolume', {
-      volumeName: 'database-volume',
+    const volume = new ec2.Volume(this, "DatabaseVolume", {
+      volumeName: "database-volume",
       availabilityZone: vpc.availabilityZones[0], // 첫 번째 AZ 사용
       size: cdk.Size.gibibytes(10),
       volumeType: ec2.EbsDeviceVolumeType.GP3,
@@ -46,7 +46,7 @@ export class DevInfraStack extends cdk.Stack {
         // EBS 관련 권한 추가
         "ec2:AttachVolume",
         "ec2:DetachVolume",
-        "ec2:DescribeVolumes"
+        "ec2:DescribeVolumes",
       ],
       resources: ["*"],
     }));
@@ -56,15 +56,20 @@ export class DevInfraStack extends cdk.Stack {
       minCapacity: 1,
       maxCapacity: 1,
       newInstancesProtectedFromScaleIn: false,
-      launchTemplate: new LaunchTemplate(this, "launch-template", {
-        launchTemplateName: "dev-ecs-cluster-launch-template",
-        keyPair: ec2.KeyPair.fromKeyPairName(this, "key-pair", "home-keypair"),
-        machineImage: ecs.EcsOptimizedImage.amazonLinux2023(),
-        instanceType: new ec2.InstanceType("t2.micro"),
-        spotOptions: {
-          requestType: ec2.SpotRequestType.ONE_TIME,
+      vpcSubnets: {
+        availabilityZones: [vpc.availabilityZones[0]],
+      },
+      mixedInstancesPolicy: {
+        instancesDistribution: {
+          spotMaxPrice: "0.007",
+          onDemandPercentageAboveBaseCapacity: 0,
+          spotAllocationStrategy: autoscaling.SpotAllocationStrategy.LOWEST_PRICE,
         },
-        userData: ec2.UserData.custom(`#!/bin/bash
+        launchTemplate: new LaunchTemplate(this, "launch-template", {
+          launchTemplateName: "dev-ecs-cluster-launch-template",
+          keyPair: ec2.KeyPair.fromKeyPairName(this, "key-pair", "home-keypair"),
+          machineImage: ecs.EcsOptimizedImage.amazonLinux2023(),
+          userData: ec2.UserData.custom(`#!/bin/bash
 yum install awscli -y
 echo ECS_CLUSTER=${cluster.clusterName} >> /etc/ecs/ecs.config;
 
@@ -82,28 +87,48 @@ echo "Attaching EBS volume..."
 aws ec2 attach-volume --volume-id $VOLUME_ID --instance-id $INSTANCE_ID --device /dev/xvdf --region ap-northeast-2
 
 # 볼륨이 연결될 때까지 대기
-while ! lsblk | grep xvdf > /dev/null; do
+while ! lsblk | grep -E 'xvdf|nvme1n1' > /dev/null; do
     echo "Waiting for volume to be attached..."
     sleep 5
 done
 
+# 디바이스 이름 결정
+if lsblk | grep nvme1n1 > /dev/null; then
+    DEVICE_NAME="/dev/nvme1n1"
+else
+    DEVICE_NAME="/dev/xvdf"
+fi
+
 # 파일시스템 확인 및 생성
-if ! blkid /dev/xvdf; then
-    echo "Creating filesystem on /dev/xvdf..."
-    mkfs -t ext4 /dev/xvdf
+if ! blkid $DEVICE_NAME; then
+    echo "Creating filesystem on $DEVICE_NAME..."
+    mkfs -t ext4 $DEVICE_NAME
 fi
 
 # 마운트 포인트 생성 및 마운트
 mkdir -p /data
-mount /dev/xvdf /data
-echo "/dev/xvdf /data ext4 defaults,nofail 0 2" >> /etc/fstab
+mount $DEVICE_NAME /data
+echo "$DEVICE_NAME /data ext4 defaults,nofail 0 2" >> /etc/fstab
 
-# Create directory for MongoDB data
+# MongoDB 데이터 디렉터리 생성
 mkdir -p /data/mongodb
+
 `),
-        role,
-        httpTokens: ec2.LaunchTemplateHttpTokens.OPTIONAL,
-      }),
+          role,
+          httpTokens: ec2.LaunchTemplateHttpTokens.OPTIONAL,
+        }),
+        launchTemplateOverrides: [
+          {
+            instanceType: new ec2.InstanceType("t3.micro"),
+          },
+          {
+            instanceType: new ec2.InstanceType("t3a.micro"),
+          },
+          {
+            instanceType: new ec2.InstanceType("t2.micro"),
+          },
+        ],
+      },
     });
 
     const capacityProvider = new ecs.AsgCapacityProvider(this, "AsgCapacityProvider", {
